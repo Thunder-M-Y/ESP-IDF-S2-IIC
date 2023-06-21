@@ -45,6 +45,7 @@ void i2c_init()
 /**
  * @brief 初始化 MPU6050
  */
+
 void MPU6050_init()
 {
     uint8_t check;
@@ -86,7 +87,7 @@ void MPU6050_init()
     i2c_master_start(cmd);                                                // 加入开始信号
     i2c_master_write_byte(cmd, (MPU_ADDR << 1) | I2C_MASTER_WRITE, true); // 以写入方式发送地址
     i2c_master_write_byte(cmd, MPU_CMD_PWR_MGMT_1, true);                 // 写入电源管理和复位控制
-    i2c_master_write_byte(cmd, 0x00, true);                               // 写入寄存器数据
+    i2c_master_write_byte(cmd, 0x00, true);                               // 写入寄存器数据，将值设置为0x00，表示不进入休眠模式、开启循环测量、开启温度传感器。
     i2c_master_stop(cmd);                                                 // 加入停止信号
     i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(1000));       // 开始发送数据
     i2c_cmd_link_delete(cmd);
@@ -94,12 +95,12 @@ void MPU6050_init()
     // 初始化默认参数（设置陀螺仪采样率分频器）
     cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);                                                // 加入开始信号
-    i2c_master_write_byte(cmd, (MPU_ADDR << 1) | I2C_MASTER_WRITE, true); // 以写入方式发送地址
-    i2c_master_write_byte(cmd, MPU_CMD_SMPLRT_DIV, true);                 // 写入寄存器地址
-    i2c_master_write_byte(cmd, 0x07, true);                               // 写入寄存器数据 Sample rate = 1kHz/(7+1) = 125Hz
-    i2c_master_stop(cmd);                                                 // 加入停止信号
-    i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(1000));       // 开始发送数据
-    i2c_cmd_link_delete(cmd);
+    i2c_master_write_byte(cmd, (MPU_ADDR << 1) | I2C_MASTER_WRITE, true); // 发送设备地址和写指令，需要带ACK
+    i2c_master_write_byte(cmd, MPU_CMD_SMPLRT_DIV, true);                 // 发送陀螺仪采样率分频器寄存器地址
+    i2c_master_write_byte(cmd, 0x07, true);                               // 设置陀螺仪采样率分频器的值为0x07
+    i2c_master_stop(cmd);                                                 // 发送停止信号
+    i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(1000));       // 执行I2C命令，超时时间为1秒
+    i2c_cmd_link_delete(cmd);                                             // 删除命令链
 
     // 初始化默认参数（数字低通滤波器配置）
     cmd = i2c_cmd_link_create();
@@ -159,18 +160,41 @@ int16_t get_accel_x()
     i2c_cmd_link_delete(cmd);
     return data.value;
 }
+float get_tem()
+{
+    union
+    {
+        uint8_t bytes[4];
+        int16_t value;
+    } data;
+    double tem=0;
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);                                                // 加入开始信号
+    i2c_master_write_byte(cmd, (MPU_ADDR << 1) | I2C_MASTER_WRITE, true); // 以写入方式发送地址
+    i2c_master_write_byte(cmd, 0x41, true);                               // 写入寄存器地址，这个寄存器是温度的高位地址
+    i2c_master_start(cmd);                                                // 加入开始信号
+    i2c_master_write_byte(cmd, (MPU_ADDR << 1) | I2C_MASTER_READ, true);  // 发送地址，以及读指令，命令之后需要带ACK
+    i2c_master_read_byte(cmd, &data.bytes[1], I2C_MASTER_ACK);            // 读取高位字节数据，放在后面
+    i2c_master_read_byte(cmd, &data.bytes[0], I2C_MASTER_NACK);           // 读取低位字节数据，放在前面
+    i2c_master_stop(cmd);                                                 // 加入停止信号
+    i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(1000));       // 开始发送数据
+    i2c_cmd_link_delete(cmd);
+    tem=(double)data.value/340+36.53;
+    return (float)tem;
+}
 
 void app_main(void)
 {
 
-    i2c_init();         // 初始化 IIC
-    MPU6050_init();     // 初始化 MPU6050
-    ESP_LOGI(TAG, "准备采集 X 轴加速度数据:");
-    vTaskDelay(100);    // 等待一秒钟开始获取 X 轴加速度
+    i2c_init();     // 初始化 IIC
+    MPU6050_init(); // 初始化 MPU6050
+    ESP_LOGI(TAG, "准备采集 数据:");
+    vTaskDelay(100); // 等待一秒钟开始获取
     while (1)
     {
         printf("%d\n", get_accel_x());
-        vTaskDelay(pdMS_TO_TICKS(100));
+        printf("温度%.2f\n", get_tem());
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
     vTaskDelete(NULL);
 }
